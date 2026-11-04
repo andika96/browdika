@@ -42,7 +42,20 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.BROWDIKA_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/browdika.p12"
+          test -s "$RUNNER_TEMP/browdika.p12"
+          echo "keystore_bytes=$(wc -c < "$RUNNER_TEMP/browdika.p12")"
+
       - name: Build debug APK
+        env:
+          BROWDIKA_KEYSTORE_PATH: ${{ runner.temp }}/browdika.p12
+          BROWDIKA_STORE_PASSWORD: ${{ secrets.BROWDIKA_STORE_PASSWORD }}
+          BROWDIKA_KEY_ALIAS: ${{ secrets.BROWDIKA_KEY_ALIAS }}
+          BROWDIKA_KEY_PASSWORD: ${{ secrets.BROWDIKA_KEY_PASSWORD }}
         run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK

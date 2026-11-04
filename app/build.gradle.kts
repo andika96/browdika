@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val browdikaKeystorePath: String? = System.getenv("BROWDIKA_KEYSTORE_PATH")
+
 android {
     namespace = "com.browdika.browser"
     compileSdk = 35
@@ -11,12 +13,32 @@ android {
         applicationId = "com.browdika.browser"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
+    }
+
+    signingConfigs {
+        if (browdikaKeystorePath != null) {
+            create("release") {
+                storeFile = file(browdikaKeystorePath)
+                storePassword = System.getenv("BROWDIKA_STORE_PASSWORD")
+                keyAlias = System.getenv("BROWDIKA_KEY_ALIAS")
+                keyPassword = System.getenv("BROWDIKA_KEY_PASSWORD")
+                storeType = "PKCS12"
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            if (browdikaKeystorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
+            if (browdikaKeystorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
