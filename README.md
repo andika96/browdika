@@ -8,6 +8,7 @@ Browser Android pribadi berbasis WebView.
 - Tab browser: buka, pilih, dan tutup tab, lengkap dengan badge jumlah tab
 - Tombol kembali, maju, beranda, muat ulang, dan tab di bar bawah
 - Daftar unduhan dengan progres, ukuran, buka file, dan hapus
+- Riwayat penjelajahan: buka lagi, hapus per item, atau hapus semua
 - Unduhan lewat DownloadManager
 - Dukungan unggah file dari situs
 - Mode gelap/terang yang tersimpan

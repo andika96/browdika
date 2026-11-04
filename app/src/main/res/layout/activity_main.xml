@@ -44,6 +44,15 @@
             android:tint="?attr/colorPrimary" />
 
         <ImageButton
+            android:id="@+id/btnHistory"
+            android:layout_width="44dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/history"
+            android:src="@drawable/ic_history"
+            android:tint="?attr/colorOnSurface" />
+
+        <ImageButton
             android:id="@+id/btnDownloads"
             android:layout_width="44dp"
             android:layout_height="48dp"

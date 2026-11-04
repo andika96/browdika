@@ -77,6 +77,9 @@ class MainActivity : AppCompatActivity() {
     private var tabsDialog: BottomSheetDialog? = null
     private var downloadsDialog: BottomSheetDialog? = null
     private var downloadsAdapter: DownloadListAdapter? = null
+    private var historyDialog: BottomSheetDialog? = null
+    private var historyAdapter: HistoryAdapter? = null
+    private lateinit var historyStore: HistoryStore
     private val downloadsHandler = Handler(Looper.getMainLooper())
     private val downloadsRefreshRunnable = object : Runnable {
         override fun run() {
@@ -132,6 +135,7 @@ class MainActivity : AppCompatActivity() {
             .replace("; wv", "") + " Browdika/1.0"
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         CookieManager.getInstance().setAcceptCookie(true)
+        historyStore = HistoryStore(this)
 
         setupToolbar()
         setupBackNavigation()
@@ -351,6 +355,9 @@ class MainActivity : AppCompatActivity() {
                     updateAddressBar(url)
                     updateNavigationButtons()
                 }
+                if (url != null && isWebUrl(url) && !isHome(url)) {
+                    runCatching { historyStore.recordVisit(url, view.title) }
+                }
                 if (url != null && isHome(url)) {
                     syncHomeTheme(view)
                 }
@@ -481,6 +488,9 @@ class MainActivity : AppCompatActivity() {
             addTab(HOME_URL)
             true
         }
+        binding.btnHistory.setOnClickListener {
+            showHistoryDialog()
+        }
         binding.btnDownloads.setOnClickListener {
             showDownloadsDialog()
         }
@@ -549,6 +559,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun isHome(url: String): Boolean = url.startsWith(ASSET_BASE)
 
+    private fun isWebUrl(url: String): Boolean =
+        url.startsWith("http://") || url.startsWith("https://")
+
     private fun updateNavigationButtons() {
         if (tabs.isEmpty()) return
         binding.btnBack.isEnabled = currentWebView.canGoBack()
@@ -607,6 +620,72 @@ class MainActivity : AppCompatActivity() {
         }
         tabsDialog = dialog
         dialog.show()
+    }
+
+    private fun showHistoryDialog() {
+        historyDialog?.dismiss()
+        val dialog = BottomSheetDialog(this)
+        val view = layoutInflater.inflate(R.layout.dialog_history, null)
+        val listView = view.findViewById<ListView>(R.id.historyList)
+        val emptyView = view.findViewById<TextView>(R.id.historyEmpty)
+
+        val adapter = HistoryAdapter(this, ::openHistoryItem, ::confirmDeleteHistory)
+        historyAdapter = adapter
+        listView.adapter = adapter
+        listView.emptyView = emptyView
+
+        view.findViewById<Button>(R.id.btnClearHistory).setOnClickListener {
+            confirmClearHistory()
+        }
+
+        dialog.setContentView(view)
+        dialog.setOnShowListener {
+            dialog.behavior.state = BottomSheetBehavior.STATE_EXPANDED
+        }
+        dialog.setOnDismissListener {
+            if (historyDialog === dialog) {
+                historyDialog = null
+                historyAdapter = null
+            }
+        }
+        historyDialog = dialog
+        dialog.show()
+        refreshHistory()
+    }
+
+    private fun refreshHistory() {
+        val items = runCatching { historyStore.getHistory() }.getOrDefault(emptyList())
+        historyAdapter?.update(items)
+    }
+
+    private fun openHistoryItem(item: HistoryItem) {
+        historyDialog?.dismiss()
+        navigate(item.url)
+    }
+
+    private fun confirmDeleteHistory(item: HistoryItem) {
+        val displayName = item.title.ifBlank { item.url }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.history_delete_title)
+            .setMessage(getString(R.string.history_delete_message, displayName))
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.history_delete_confirm) { _, _ ->
+                historyStore.delete(item.id)
+                refreshHistory()
+            }
+            .show()
+    }
+
+    private fun confirmClearHistory() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.history_clear_title)
+            .setMessage(R.string.history_clear_message)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.history_clear_confirm) { _, _ ->
+                historyStore.clear()
+                refreshHistory()
+            }
+            .show()
     }
 
     private fun showDownloadsDialog() {
@@ -1049,12 +1128,14 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         downloadsHandler.removeCallbacks(downloadsRefreshRunnable)
         downloadsDialog?.dismiss()
+        historyDialog?.dismiss()
         tabsDialog?.dismiss()
         tabs.forEach {
             binding.webContainer.removeView(it.webView)
             it.webView.destroy()
         }
         tabs.clear()
+        if (::historyStore.isInitialized) historyStore.close()
         super.onDestroy()
     }
 

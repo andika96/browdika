@@ -47,4 +47,15 @@
     <string name="download_reason_redirect">terlalu banyak pengalihan</string>
     <string name="download_reason_http_code">kode HTTP tidak ditangani</string>
     <string name="download_reason_unknown">kesalahan tidak diketahui</string>
+    <string name="history">Riwayat</string>
+    <string name="history_title">Riwayat</string>
+    <string name="history_empty">Belum ada riwayat.</string>
+    <string name="history_clear">Hapus semua riwayat</string>
+    <string name="history_clear_title">Hapus semua riwayat?</string>
+    <string name="history_clear_message">Semua riwayat penjelajahan akan dihapus. Tindakan ini tidak bisa dibatalkan.</string>
+    <string name="history_clear_confirm">Hapus semua</string>
+    <string name="history_delete">Hapus riwayat</string>
+    <string name="history_delete_title">Hapus riwayat ini?</string>
+    <string name="history_delete_message">Riwayat “%1$s” akan dihapus.</string>
+    <string name="history_delete_confirm">Hapus</string>
 </resources>
