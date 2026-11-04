@@ -6,6 +6,8 @@ import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Color
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Build
@@ -13,6 +15,8 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
@@ -27,16 +31,26 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewFeature
 import com.browdika.browser.databinding.ActivityMainBinding
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.bottomsheet.BottomSheetDialog
 
 class MainActivity : AppCompatActivity() {
 
@@ -48,10 +62,20 @@ class MainActivity : AppCompatActivity() {
             .build()
     }
 
+    private val tabs = mutableListOf<BrowserTab>()
+    private var currentTabIndex = 0
+    private val currentWebView: WebView
+        get() = tabs[currentTabIndex].webView
+
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var fallbackBlockedUntil = 0L
     private lateinit var mobileUserAgent: String
-    private var facebookDesktopMode = false
+    private var tabsDialog: BottomSheetDialog? = null
+
+    private data class BrowserTab(
+        val webView: WebView,
+        var desktopFacebook: Boolean = false
+    )
 
     private val fileChooserLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -76,7 +100,6 @@ class MainActivity : AppCompatActivity() {
             callback.onReceiveValue(uris)
         }
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -92,26 +115,119 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        setupWebView()
+        mobileUserAgent = WebSettings.getDefaultUserAgent(this)
+            .replace("; wv", "") + " Browdika/1.0"
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        CookieManager.getInstance().setAcceptCookie(true)
+
         setupToolbar()
         setupBackNavigation()
         requestLegacyStoragePermission()
+        restoreOrCreateTabs(savedInstanceState)
+        updateThemeButton()
+    }
 
-        if (savedInstanceState != null) {
-            binding.webView.restoreState(savedInstanceState)
-        } else {
-            val data = intent?.data
-            if (data != null && (data.scheme == "http" || data.scheme == "https")) {
-                binding.webView.loadUrl(data.toString())
-            } else {
-                binding.webView.loadUrl(HOME_URL)
+    private fun restoreOrCreateTabs(state: Bundle?) {
+        val savedUrls = state?.getStringArray(KEY_TAB_URLS)
+        if (!savedUrls.isNullOrEmpty()) {
+            val savedDesktop = state.getBooleanArray(KEY_TAB_DESKTOP)
+            savedUrls.forEachIndexed { index, url ->
+                addTab(
+                    url = url.ifBlank { HOME_URL },
+                    select = false,
+                    desktopFacebook = savedDesktop?.getOrNull(index) == true
+                )
             }
+            val index = state.getInt(KEY_CURRENT_TAB, 0)
+                .coerceIn(0, tabs.lastIndex)
+            selectTab(index)
+            return
+        }
+
+        val data = intent?.data
+        val initialUrl = if (data != null && (data.scheme == "http" || data.scheme == "https")) {
+            data.toString()
+        } else {
+            HOME_URL
+        }
+        addTab(initialUrl)
+    }
+
+    private fun addTab(
+        url: String = HOME_URL,
+        select: Boolean = true,
+        desktopFacebook: Boolean = false
+    ) {
+        val webView = createWebView()
+        val tab = BrowserTab(webView)
+        tabs.add(tab)
+        binding.webContainer.addView(
+            webView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        webView.visibility = if (select) View.VISIBLE else View.GONE
+
+        if (desktopFacebook || isFacebookMessagesUrl(url)) {
+            tab.desktopFacebook = true
+            webView.settings.userAgentString = DESKTOP_USER_AGENT
+        }
+        webView.loadUrl(url)
+
+        if (select) {
+            selectTab(tabs.lastIndex)
+        } else {
+            updateTabButton()
         }
     }
 
+    private fun selectTab(index: Int) {
+        if (index !in tabs.indices) return
+        currentTabIndex = index
+
+        tabs.forEachIndexed { tabIndex, tab ->
+            val selected = tabIndex == index
+            tab.webView.visibility = if (selected) View.VISIBLE else View.GONE
+            if (selected) tab.webView.onResume() else tab.webView.onPause()
+        }
+
+        val webView = tabs[index].webView
+        binding.progressBar.progress = webView.progress
+        binding.progressBar.isVisible = webView.progress < 100
+        updateAddressBar(webView.url)
+        updateNavigationButtons()
+        updateTabButton()
+    }
+
+    private fun closeTab(index: Int) {
+        if (index !in tabs.indices) return
+
+        if (tabs.size == 1) {
+            val oldTab = tabs.removeAt(0)
+            binding.webContainer.removeView(oldTab.webView)
+            oldTab.webView.destroy()
+            currentTabIndex = 0
+            addTab(HOME_URL)
+            return
+        }
+
+        val wasCurrent = index == currentTabIndex
+        val removed = tabs.removeAt(index)
+        binding.webContainer.removeView(removed.webView)
+        removed.webView.destroy()
+
+        when {
+            wasCurrent -> currentTabIndex = index.coerceAtMost(tabs.lastIndex)
+            index < currentTabIndex -> currentTabIndex--
+        }
+        selectTab(currentTabIndex)
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
-    private fun setupWebView() {
-        val webView = binding.webView
+    private fun createWebView(): WebView {
+        val webView = WebView(this)
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -130,19 +246,17 @@ class MainActivity : AppCompatActivity() {
             useWideViewPort = true
             loadWithOverviewMode = true
             cacheMode = WebSettings.LOAD_DEFAULT
-
-            // Remove the Android WebView marker and identify the app instead.
-            // This improves compatibility with sites that reject embedded WebViews.
-            mobileUserAgent = userAgentString.replace("; wv", "") + " Browdika/1.0"
             userAgentString = mobileUserAgent
         }
 
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(webView, true)
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.settings, isNightMode())
         }
+        webView.setBackgroundColor(
+            if (isNightMode()) Color.parseColor("#0F1216") else Color.WHITE
+        )
 
-        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(
@@ -158,44 +272,45 @@ class MainActivity : AppCompatActivity() {
             ): Boolean {
                 val url = request.url
                 val scheme = url.scheme?.lowercase() ?: return false
+                val tab = tabFor(view)
 
                 // While Facebook is shown in desktop mode, ignore its attempts to
                 // hand the page over to the Facebook/Messenger app. Keeping the
                 // desktop page open is what lets Messages work inside the browser.
-                if (facebookDesktopMode && isFacebookAppUri(url)) {
+                if (tab?.desktopFacebook == true && isFacebookAppUri(url)) {
                     return true
                 }
 
                 return when (scheme) {
                     "http", "https", "about", "data" -> {
                         if (isFacebookMessagesUrl(url.toString())) {
-                            if (!(facebookDesktopMode && isFacebookUrl(view.url))) {
-                                openFacebookWeb(url.toString())
+                            if (!(tab?.desktopFacebook == true && isFacebookUrl(view.url))) {
+                                openFacebookWeb(view, url.toString())
                                 return true
                             }
-                        } else if (facebookDesktopMode &&
+                        } else if (tab?.desktopFacebook == true &&
                             url.host != null &&
                             !isFacebookHost(url.host)
                         ) {
-                            restoreMobileUserAgent()
+                            restoreMobileUserAgent(view)
                         }
                         false
                     }
                     "file", "javascript" -> true
                     "fb", "fbconnect", "facebook" -> {
-                        openFacebookWeb(facebookWebFallback(url))
+                        openFacebookWeb(view, facebookWebFallback(url))
                         true
                     }
                     "fb-messenger", "messenger" -> {
-                        openFacebookWeb(MESSENGER_URL)
+                        openFacebookWeb(view, MESSENGER_URL)
                         true
                     }
                     "intent" -> {
-                        openIntentUri(url)
+                        openIntentUri(view, url)
                         true
                     }
                     else -> {
-                        openExternal(url)
+                        openExternal(view, url)
                         true
                     }
                 }
@@ -206,22 +321,32 @@ class MainActivity : AppCompatActivity() {
                 url: String?,
                 favicon: android.graphics.Bitmap?
             ) {
-                if (facebookDesktopMode && url != null && !isFacebookUrl(url)) {
-                    restoreMobileUserAgent()
+                val tab = tabFor(view)
+                if (tab?.desktopFacebook == true && url != null && !isFacebookUrl(url)) {
+                    restoreMobileUserAgent(view)
                 }
-                binding.progressBar.isVisible = true
-                updateAddressBar(url)
-                updateNavigationButtons()
+                if (isCurrent(view)) {
+                    binding.progressBar.isVisible = true
+                    updateAddressBar(url)
+                    updateNavigationButtons()
+                }
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
-                binding.progressBar.isVisible = false
-                updateAddressBar(url)
-                updateNavigationButtons()
+                if (isCurrent(view)) {
+                    binding.progressBar.isVisible = false
+                    updateAddressBar(url)
+                    updateNavigationButtons()
+                }
+                if (url != null && isHome(url)) {
+                    syncHomeTheme(view)
+                }
             }
 
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
-                updateNavigationButtons()
+                if (isCurrent(view)) {
+                    updateNavigationButtons()
+                }
             }
 
             override fun onReceivedError(
@@ -229,7 +354,7 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest,
                 error: WebResourceError
             ) {
-                if (request.isForMainFrame) {
+                if (request.isForMainFrame && isCurrent(view)) {
                     binding.progressBar.isVisible = false
                     Toast.makeText(
                         this@MainActivity,
@@ -256,14 +381,16 @@ class MainActivity : AppCompatActivity() {
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
-                binding.progressBar.progress = newProgress
-                binding.progressBar.isVisible = newProgress < 100
+                if (isCurrent(view)) {
+                    binding.progressBar.progress = newProgress
+                    binding.progressBar.isVisible = newProgress < 100
+                }
             }
 
             override fun onShowFileChooser(
                 webView: WebView,
                 filePathCallback: ValueCallback<Array<Uri>>,
-                fileChooserParams: WebChromeClient.FileChooserParams
+                fileChooserParams: FileChooserParams
             ): Boolean {
                 fileChooserCallback?.onReceiveValue(null)
                 fileChooserCallback = filePathCallback
@@ -289,8 +416,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-            downloadFile(url, userAgent, contentDisposition, mimeType)
+            downloadFile(
+                url,
+                userAgent ?: webView.settings.userAgentString,
+                contentDisposition,
+                mimeType
+            )
         }
+
+        return webView
     }
 
     private fun setupToolbar() {
@@ -311,25 +445,48 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnBack.setOnClickListener {
-            if (binding.webView.canGoBack()) binding.webView.goBack()
+            if (currentWebView.canGoBack()) currentWebView.goBack()
         }
         binding.btnForward.setOnClickListener {
-            if (binding.webView.canGoForward()) binding.webView.goForward()
+            if (currentWebView.canGoForward()) currentWebView.goForward()
         }
         binding.btnReload.setOnClickListener {
-            binding.webView.reload()
+            if (currentWebView.url == null) {
+                currentWebView.loadUrl(HOME_URL)
+            } else {
+                currentWebView.reload()
+            }
         }
         binding.btnHome.setOnClickListener {
-            restoreMobileUserAgent()
-            binding.webView.loadUrl(HOME_URL)
+            restoreMobileUserAgent(currentWebView)
+            currentWebView.loadUrl(HOME_URL)
+        }
+        binding.btnTabs.setOnClickListener {
+            showTabsDialog()
+        }
+        binding.btnTabs.setOnLongClickListener {
+            addTab(HOME_URL)
+            true
+        }
+        binding.btnTheme.setOnClickListener {
+            toggleTheme()
+        }
+        binding.btnTheme.setOnLongClickListener {
+            useSystemTheme()
+            true
         }
     }
 
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (binding.webView.canGoBack()) {
-                    binding.webView.goBack()
+                if (tabs.isEmpty()) {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    return
+                }
+                if (currentWebView.canGoBack()) {
+                    currentWebView.goBack()
                 } else {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
@@ -349,10 +506,15 @@ class MainActivity : AppCompatActivity() {
             else -> googleSearch(text)
         }
 
-        if (!isFacebookUrl(url)) {
-            restoreMobileUserAgent()
+        val webView = currentWebView
+        if (isFacebookMessagesUrl(url)) {
+            openFacebookWeb(webView, url)
+        } else {
+            if (!isFacebookUrl(url)) {
+                restoreMobileUserAgent(webView)
+            }
+            webView.loadUrl(url)
         }
-        binding.webView.loadUrl(url)
         binding.addressBar.clearFocus()
         hideKeyboard()
     }
@@ -372,10 +534,62 @@ class MainActivity : AppCompatActivity() {
     private fun isHome(url: String): Boolean = url.startsWith(ASSET_BASE)
 
     private fun updateNavigationButtons() {
-        binding.btnBack.isEnabled = binding.webView.canGoBack()
-        binding.btnForward.isEnabled = binding.webView.canGoForward()
+        if (tabs.isEmpty()) return
+        binding.btnBack.isEnabled = currentWebView.canGoBack()
+        binding.btnForward.isEnabled = currentWebView.canGoForward()
         binding.btnBack.alpha = if (binding.btnBack.isEnabled) 1f else 0.35f
         binding.btnForward.alpha = if (binding.btnForward.isEnabled) 1f else 0.35f
+    }
+
+    private fun updateTabButton() {
+        binding.btnTabs.contentDescription = getString(R.string.tabs_count, tabs.size)
+    }
+
+    private fun showTabsDialog() {
+        tabsDialog?.dismiss()
+        val dialog = BottomSheetDialog(this)
+        val view = layoutInflater.inflate(R.layout.dialog_tabs, null)
+        val list = view.findViewById<LinearLayout>(R.id.tabList)
+
+        tabs.forEachIndexed { index, tab ->
+            val item = layoutInflater.inflate(R.layout.item_tab, list, false)
+            val title = item.findViewById<TextView>(R.id.tabTitle)
+            val urlView = item.findViewById<TextView>(R.id.tabUrl)
+            val active = item.findViewById<TextView>(R.id.tabActive)
+            val close = item.findViewById<ImageButton>(R.id.btnCloseTab)
+            val webView = tab.webView
+
+            title.text = webView.title?.takeIf { it.isNotBlank() }
+                ?: getString(R.string.new_tab)
+            urlView.text = webView.url ?: getString(R.string.new_tab)
+            active.isVisible = index == currentTabIndex
+
+            item.setOnClickListener {
+                selectTab(index)
+                dialog.dismiss()
+            }
+            close.setOnClickListener {
+                dialog.dismiss()
+                closeTab(index)
+                showTabsDialog()
+            }
+            list.addView(item)
+        }
+
+        view.findViewById<Button>(R.id.btnNewTab).setOnClickListener {
+            dialog.dismiss()
+            addTab(HOME_URL)
+        }
+
+        dialog.setContentView(view)
+        dialog.setOnShowListener {
+            dialog.behavior.state = BottomSheetBehavior.STATE_EXPANDED
+        }
+        dialog.setOnDismissListener {
+            if (tabsDialog === dialog) tabsDialog = null
+        }
+        tabsDialog = dialog
+        dialog.show()
     }
 
     private fun downloadFile(
@@ -388,10 +602,7 @@ class MainActivity : AppCompatActivity() {
             val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
             val request = DownloadManager.Request(Uri.parse(url)).apply {
                 setMimeType(mimeType)
-                addRequestHeader(
-                    "User-Agent",
-                    userAgent ?: binding.webView.settings.userAgentString
-                )
+                addRequestHeader("User-Agent", userAgent ?: mobileUserAgent)
                 CookieManager.getInstance().getCookie(url)?.let { cookie ->
                     addRequestHeader("Cookie", cookie)
                 }
@@ -418,22 +629,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openExternal(uri: Uri, fallbackUrl: String? = null) {
+    private fun openExternal(webView: WebView, uri: Uri, fallbackUrl: String? = null) {
         try {
             startActivity(
                 Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         } catch (e: ActivityNotFoundException) {
             if (fallbackUrl != null) {
-                loadFallback(fallbackUrl)
+                loadFallback(webView, fallbackUrl)
             } else {
                 showNoApp()
             }
         }
     }
 
-    private fun openIntentUri(uri: Uri) {
-        if (facebookDesktopMode && isFacebookAppUri(uri)) return
+    private fun openIntentUri(webView: WebView, uri: Uri) {
+        val tab = tabFor(webView)
+        if (tab?.desktopFacebook == true && isFacebookAppUri(uri)) return
+
         try {
             val intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
             try {
@@ -443,10 +656,10 @@ class MainActivity : AppCompatActivity() {
                 val data = intent.data
                 when {
                     !fallback.isNullOrBlank() -> {
-                        if (!handleSchemeFallback(Uri.parse(fallback))) showNoApp()
+                        if (!handleSchemeFallback(webView, Uri.parse(fallback))) showNoApp()
                     }
                     data != null -> {
-                        if (!handleSchemeFallback(data)) showNoApp()
+                        if (!handleSchemeFallback(webView, data)) showNoApp()
                     }
                     else -> showNoApp()
                 }
@@ -456,27 +669,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun handleSchemeFallback(uri: Uri): Boolean {
+    private fun handleSchemeFallback(webView: WebView, uri: Uri): Boolean {
         return when (uri.scheme?.lowercase()) {
             "http", "https" -> {
                 val url = uri.toString()
                 if (isFacebookUrl(url)) {
-                    openFacebookWeb(url)
+                    openFacebookWeb(webView, url)
                 } else {
-                    loadFallback(url)
+                    loadFallback(webView, url)
                 }
                 true
             }
             "fb", "fbconnect", "facebook" -> {
-                openFacebookWeb(facebookWebFallback(uri))
+                openFacebookWeb(webView, facebookWebFallback(uri))
                 true
             }
             "fb-messenger", "messenger" -> {
-                openFacebookWeb(MESSENGER_URL)
+                openFacebookWeb(webView, MESSENGER_URL)
                 true
             }
             "intent" -> {
-                openIntentUri(uri)
+                openIntentUri(webView, uri)
                 true
             }
             else -> false
@@ -508,16 +721,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openFacebookWeb(url: String) {
-        facebookDesktopMode = true
-        binding.webView.settings.userAgentString = DESKTOP_USER_AGENT
-        binding.webView.loadUrl(url)
+    private fun openFacebookWeb(webView: WebView, url: String) {
+        val tab = tabFor(webView) ?: return
+        tab.desktopFacebook = true
+        webView.settings.userAgentString = DESKTOP_USER_AGENT
+        webView.loadUrl(url)
     }
 
-    private fun restoreMobileUserAgent() {
-        if (!facebookDesktopMode) return
-        facebookDesktopMode = false
-        binding.webView.settings.userAgentString = mobileUserAgent
+    private fun restoreMobileUserAgent(webView: WebView) {
+        val tab = tabFor(webView) ?: return
+        if (!tab.desktopFacebook) return
+        tab.desktopFacebook = false
+        webView.settings.userAgentString = mobileUserAgent
     }
 
     private fun isFacebookHost(host: String?): Boolean {
@@ -561,11 +776,67 @@ class MainActivity : AppCompatActivity() {
             raw.contains("scheme=fb")
     }
 
-    private fun loadFallback(url: String) {
+    private fun loadFallback(webView: WebView, url: String) {
         val now = SystemClock.elapsedRealtime()
         if (now < fallbackBlockedUntil) return
         fallbackBlockedUntil = now + FALLBACK_GUARD_MS
-        binding.webView.loadUrl(url)
+        webView.loadUrl(url)
+    }
+
+    private fun tabFor(webView: WebView): BrowserTab? =
+        tabs.firstOrNull { it.webView === webView }
+
+    private fun isCurrent(webView: WebView): Boolean =
+        tabs.isNotEmpty() && webView === currentWebView
+
+    private fun isNightMode(): Boolean =
+        (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+
+    private fun updateThemeButton() {
+        val dark = isNightMode()
+        binding.btnTheme.setImageResource(
+            if (dark) R.drawable.ic_light_mode else R.drawable.ic_dark_mode
+        )
+        binding.btnTheme.contentDescription = getString(
+            if (dark) R.string.switch_to_light else R.string.switch_to_dark
+        )
+    }
+
+    private fun toggleTheme() {
+        val next = if (isNightMode()) {
+            BrowdikaApp.THEME_LIGHT
+        } else {
+            BrowdikaApp.THEME_DARK
+        }
+        getSharedPreferences(BrowdikaApp.PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(BrowdikaApp.KEY_THEME, next)
+            .apply()
+        AppCompatDelegate.setDefaultNightMode(
+            if (next == BrowdikaApp.THEME_DARK) {
+                AppCompatDelegate.MODE_NIGHT_YES
+            } else {
+                AppCompatDelegate.MODE_NIGHT_NO
+            }
+        )
+    }
+
+    private fun useSystemTheme() {
+        getSharedPreferences(BrowdikaApp.PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(BrowdikaApp.KEY_THEME, BrowdikaApp.THEME_SYSTEM)
+            .apply()
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+        Toast.makeText(this, R.string.theme_follow_system, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun syncHomeTheme(webView: WebView) {
+        val theme = if (isNightMode()) "dark" else "light"
+        webView.evaluateJavascript(
+            "document.documentElement.dataset.theme='$theme';",
+            null
+        )
     }
 
     private fun showNoApp() {
@@ -598,28 +869,44 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         val data = intent.data ?: return
         if (data.scheme == "http" || data.scheme == "https") {
-            binding.webView.loadUrl(data.toString())
+            val webView = currentWebView
+            if (!isFacebookUrl(data.toString())) {
+                restoreMobileUserAgent(webView)
+            }
+            webView.loadUrl(data.toString())
         }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        val urls = tabs.map { it.webView.url ?: HOME_URL }
+        outState.putStringArray(KEY_TAB_URLS, urls.toTypedArray())
+        outState.putBooleanArray(
+            KEY_TAB_DESKTOP,
+            tabs.map { it.desktopFacebook }.toBooleanArray()
+        )
+        outState.putInt(KEY_CURRENT_TAB, currentTabIndex)
         super.onSaveInstanceState(outState)
-        binding.webView.saveState(outState)
     }
 
     override fun onPause() {
         CookieManager.getInstance().flush()
-        binding.webView.onPause()
+        tabs.forEach { it.webView.onPause() }
         super.onPause()
     }
 
     override fun onResume() {
         super.onResume()
-        binding.webView.onResume()
+        tabs.forEach { it.webView.onResume() }
+        updateThemeButton()
     }
 
     override fun onDestroy() {
-        binding.webView.destroy()
+        tabsDialog?.dismiss()
+        tabs.forEach {
+            binding.webContainer.removeView(it.webView)
+            it.webView.destroy()
+        }
+        tabs.clear()
         super.onDestroy()
     }
 
@@ -632,5 +919,8 @@ class MainActivity : AppCompatActivity() {
                 "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         private const val FALLBACK_GUARD_MS = 5000L
         private const val LEGACY_STORAGE_REQUEST = 100
+        private const val KEY_TAB_URLS = "tab_urls"
+        private const val KEY_TAB_DESKTOP = "tab_desktop"
+        private const val KEY_CURRENT_TAB = "current_tab"
     }
 }

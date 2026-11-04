@@ -12,6 +12,7 @@
         android:maxSdkVersion="28" />
 
     <application
+        android:name=".BrowdikaApp"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="true"
         android:hardwareAccelerated="true"

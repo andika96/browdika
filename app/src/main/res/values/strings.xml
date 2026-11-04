@@ -7,4 +7,13 @@
     <string name="forward">Maju</string>
     <string name="home">Beranda</string>
     <string name="reload">Muat ulang</string>
+    <string name="tabs">Tab</string>
+    <string name="tabs_title">Tab</string>
+    <string name="tabs_count">Tab, %1$d terbuka</string>
+    <string name="new_tab">+ Tab baru</string>
+    <string name="close_tab">Tutup tab</string>
+    <string name="active_tab">Aktif</string>
+    <string name="switch_to_dark">Mode gelap</string>
+    <string name="switch_to_light">Mode terang</string>
+    <string name="theme_follow_system">Mengikuti tema sistem</string>
 </resources>

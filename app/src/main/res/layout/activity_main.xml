@@ -10,10 +10,19 @@
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="8dp"
+        android:paddingStart="4dp"
         android:paddingTop="8dp"
-        android:paddingEnd="8dp"
+        android:paddingEnd="4dp"
         android:paddingBottom="4dp">
+
+        <ImageButton
+            android:id="@+id/btnTabs"
+            android:layout_width="44dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/tabs"
+            android:src="@drawable/ic_tabs"
+            android:tint="?attr/colorOnSurface" />
 
         <EditText
             android:id="@+id/addressBar"
@@ -35,13 +44,22 @@
 
         <ImageButton
             android:id="@+id/btnGo"
-            android:layout_width="48dp"
+            android:layout_width="44dp"
             android:layout_height="48dp"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="2dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/go"
             android:src="@drawable/ic_go"
             android:tint="?attr/colorPrimary" />
+
+        <ImageButton
+            android:id="@+id/btnTheme"
+            android:layout_width="44dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/switch_to_dark"
+            android:src="@drawable/ic_dark_mode"
+            android:tint="?attr/colorOnSurface" />
     </LinearLayout>
 
     <ProgressBar
@@ -53,8 +71,8 @@
         android:progressTint="?attr/colorPrimary"
         android:visibility="gone" />
 
-    <WebView
-        android:id="@+id/webView"
+    <FrameLayout
+        android:id="@+id/webContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1" />
