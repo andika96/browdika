@@ -11,6 +11,7 @@ import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -48,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private var fallbackBlockedUntil = 0L
 
     private val fileChooserLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -157,6 +159,14 @@ class MainActivity : AppCompatActivity() {
                 return when (scheme) {
                     "http", "https", "about", "data" -> false
                     "file", "javascript" -> true
+                    "fb", "fbconnect", "facebook" -> {
+                        loadFallback(facebookWebFallback(url))
+                        true
+                    }
+                    "fb-messenger", "messenger" -> {
+                        loadFallback(MESSENGER_URL)
+                        true
+                    }
                     "intent" -> {
                         openIntentUri(url)
                         true
@@ -378,27 +388,102 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openExternal(uri: Uri) {
+    private fun openExternal(uri: Uri, fallbackUrl: String? = null) {
         try {
             startActivity(
                 Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         } catch (e: ActivityNotFoundException) {
-            Toast.makeText(
-                this,
-                "Tidak ada aplikasi untuk membuka tautan ini.",
-                Toast.LENGTH_SHORT
-            ).show()
+            if (fallbackUrl != null) {
+                loadFallback(fallbackUrl)
+            } else {
+                showNoApp()
+            }
         }
     }
 
     private fun openIntentUri(uri: Uri) {
         try {
             val intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
-            startActivity(intent)
+            try {
+                startActivity(intent)
+            } catch (e: ActivityNotFoundException) {
+                val fallback = intent.getStringExtra("browser_fallback_url")
+                val data = intent.data
+                when {
+                    !fallback.isNullOrBlank() -> loadFallback(fallback)
+                    data != null && handleSchemeFallback(data) -> Unit
+                    else -> showNoApp()
+                }
+            }
         } catch (e: Exception) {
-            openExternal(uri)
+            showNoApp()
         }
+    }
+
+    private fun handleSchemeFallback(uri: Uri): Boolean {
+        return when (uri.scheme?.lowercase()) {
+            "http", "https" -> {
+                loadFallback(uri.toString())
+                true
+            }
+            "fb", "fbconnect", "facebook" -> {
+                loadFallback(facebookWebFallback(uri))
+                true
+            }
+            "fb-messenger", "messenger" -> {
+                loadFallback(MESSENGER_URL)
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun facebookWebFallback(uri: Uri): String {
+        val target = ((uri.host ?: "") + "/" + (uri.path ?: "")).lowercase()
+        return when {
+            "messag" in target || "thread" in target ->
+                "https://m.facebook.com/messages"
+            "notification" in target ->
+                "https://m.facebook.com/notifications"
+            "profile" in target -> {
+                val id = uri.lastPathSegment
+                if (!id.isNullOrBlank()) {
+                    "https://m.facebook.com/profile.php?id=$id"
+                } else {
+                    "https://m.facebook.com/profile.php"
+                }
+            }
+            "friend" in target ->
+                "https://m.facebook.com/friends"
+            "group" in target ->
+                "https://m.facebook.com/groups"
+            "video" in target || "watch" in target ->
+                "https://m.facebook.com/watch"
+            else -> "https://m.facebook.com/"
+        }
+    }
+
+    private fun loadFallback(url: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (now < fallbackBlockedUntil) {
+            Toast.makeText(
+                this,
+                "Tautan ini tidak bisa dibuka di browser.",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        fallbackBlockedUntil = now + FALLBACK_GUARD_MS
+        binding.webView.loadUrl(url)
+    }
+
+    private fun showNoApp() {
+        Toast.makeText(
+            this,
+            "Tidak ada aplikasi untuk membuka tautan ini.",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun hideKeyboard() {
@@ -451,6 +536,8 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val ASSET_BASE = "https://appassets.androidplatform.net/assets/"
         private const val HOME_URL = ASSET_BASE + "home.html"
+        private const val MESSENGER_URL = "https://m.facebook.com/messages"
+        private const val FALLBACK_GUARD_MS = 5000L
         private const val LEGACY_STORAGE_REQUEST = 100
     }
 }
