@@ -5,9 +5,13 @@ Browser Android pribadi berbasis WebView.
 ## Fitur MVP
 
 - Address bar dengan pencarian Google otomatis
-- Tombol kembali, maju, beranda, muat ulang
+- Tab browser: buka, pilih, dan tutup tab, lengkap dengan badge jumlah tab
+- Tombol kembali, maju, beranda, muat ulang, dan tab di bar bawah
+- Daftar unduhan dengan progres, ukuran, buka file, dan hapus
 - Unduhan lewat DownloadManager
 - Dukungan unggah file dari situs
+- Mode gelap/terang yang tersimpan
+- Teks berjalan di halaman utama
 - Cookie, DOM storage, dan User-Agent yang kompatibel
 - Edge-to-edge untuk Android 15
 

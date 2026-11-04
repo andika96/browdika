@@ -13,6 +13,8 @@ import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
@@ -35,11 +37,13 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.ViewCompat
@@ -71,6 +75,15 @@ class MainActivity : AppCompatActivity() {
     private var fallbackBlockedUntil = 0L
     private lateinit var mobileUserAgent: String
     private var tabsDialog: BottomSheetDialog? = null
+    private var downloadsDialog: BottomSheetDialog? = null
+    private var downloadsAdapter: DownloadListAdapter? = null
+    private val downloadsHandler = Handler(Looper.getMainLooper())
+    private val downloadsRefreshRunnable = object : Runnable {
+        override fun run() {
+            refreshDownloadList()
+            downloadsHandler.postDelayed(this, 1000L)
+        }
+    }
 
     private data class BrowserTab(
         val webView: WebView,
@@ -468,6 +481,9 @@ class MainActivity : AppCompatActivity() {
             addTab(HOME_URL)
             true
         }
+        binding.btnDownloads.setOnClickListener {
+            showDownloadsDialog()
+        }
         binding.btnTheme.setOnClickListener {
             toggleTheme()
         }
@@ -542,6 +558,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateTabButton() {
+        binding.tvTabCount.text = tabs.size.toString()
         binding.btnTabs.contentDescription = getString(R.string.tabs_count, tabs.size)
     }
 
@@ -590,6 +607,126 @@ class MainActivity : AppCompatActivity() {
         }
         tabsDialog = dialog
         dialog.show()
+    }
+
+    private fun showDownloadsDialog() {
+        downloadsDialog?.dismiss()
+        val dialog = BottomSheetDialog(this)
+        val view = layoutInflater.inflate(R.layout.dialog_downloads, null)
+        val listView = view.findViewById<ListView>(R.id.downloadList)
+        val emptyView = view.findViewById<TextView>(R.id.downloadEmpty)
+
+        val adapter = DownloadListAdapter(this, ::openDownload, ::confirmDeleteDownload)
+        downloadsAdapter = adapter
+        listView.adapter = adapter
+        listView.emptyView = emptyView
+
+        view.findViewById<Button>(R.id.btnOpenDownloadsFolder).setOnClickListener {
+            openDownloadsFolder()
+        }
+
+        dialog.setContentView(view)
+        dialog.setOnShowListener {
+            dialog.behavior.state = BottomSheetBehavior.STATE_EXPANDED
+        }
+        dialog.setOnDismissListener {
+            if (downloadsDialog === dialog) {
+                downloadsHandler.removeCallbacks(downloadsRefreshRunnable)
+                downloadsDialog = null
+                downloadsAdapter = null
+            }
+        }
+        downloadsDialog = dialog
+        dialog.show()
+        refreshDownloadList()
+        downloadsHandler.post(downloadsRefreshRunnable)
+    }
+
+    private fun refreshDownloadList() {
+        downloadsAdapter?.update(queryDownloads())
+    }
+
+    private fun queryDownloads(): List<DownloadItem> {
+        val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        val items = mutableListOf<DownloadItem>()
+
+        try {
+            manager.query(DownloadManager.Query()).use { cursor ->
+                val idIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+                val titleIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)
+                val statusIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+                val downloadedIndex =
+                    cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                val totalIndex =
+                    cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                val mimeIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE)
+                val reasonIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)
+
+                while (cursor.moveToNext()) {
+                    items.add(
+                        DownloadItem(
+                            id = cursor.getLong(idIndex),
+                            title = cursor.getString(titleIndex) ?: "",
+                            status = cursor.getInt(statusIndex),
+                            bytesDownloaded = cursor.getLong(downloadedIndex),
+                            totalBytes = cursor.getLong(totalIndex),
+                            mimeType = cursor.getString(mimeIndex),
+                            reason = cursor.getInt(reasonIndex)
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            return emptyList()
+        }
+
+        return items.sortedByDescending { it.id }
+    }
+
+    private fun openDownload(item: DownloadItem) {
+        if (item.status != DownloadManager.STATUS_SUCCESSFUL) {
+            Toast.makeText(this, R.string.download_not_finished, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        val uri = manager.getUriForDownloadedFile(item.id)
+        if (uri == null) {
+            Toast.makeText(this, R.string.download_missing, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, item.mimeType?.takeIf { it.isNotBlank() } ?: "*/*")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.download_no_app, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun confirmDeleteDownload(item: DownloadItem) {
+        val displayName = item.title.ifBlank { getString(R.string.download_untitled) }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.download_delete_title)
+            .setMessage(getString(R.string.download_delete_message, displayName))
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.download_delete_confirm) { _, _ ->
+                val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+                manager.remove(item.id)
+                refreshDownloadList()
+            }
+            .show()
+    }
+
+    private fun openDownloadsFolder() {
+        try {
+            startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.download_folder_error, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun downloadFile(
@@ -889,6 +1026,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        downloadsHandler.removeCallbacks(downloadsRefreshRunnable)
         CookieManager.getInstance().flush()
         tabs.forEach { it.webView.onPause() }
         super.onPause()
@@ -898,9 +1036,15 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         tabs.forEach { it.webView.onResume() }
         updateThemeButton()
+        if (downloadsDialog != null) {
+            refreshDownloadList()
+            downloadsHandler.post(downloadsRefreshRunnable)
+        }
     }
 
     override fun onDestroy() {
+        downloadsHandler.removeCallbacks(downloadsRefreshRunnable)
+        downloadsDialog?.dismiss()
         tabsDialog?.dismiss()
         tabs.forEach {
             binding.webContainer.removeView(it.webView)
