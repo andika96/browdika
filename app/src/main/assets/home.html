@@ -109,38 +109,10 @@
             }
             .marquee-track span[aria-hidden="true"] { display: none; }
         }
-        form {
-            width: 100%;
-            max-width: 560px;
-            display: flex;
-            gap: 8px;
-        }
-        input[type="text"] {
-            flex: 1;
-            height: 50px;
-            padding: 0 18px;
-            border-radius: 25px;
-            border: 1px solid var(--border);
-            background: var(--card);
-            color: var(--text);
-            font-size: 16px;
-            outline: none;
-        }
-        input[type="text"]:focus { border-color: var(--accent); }
-        button {
-            height: 50px;
-            padding: 0 22px;
-            border: 0;
-            border-radius: 25px;
-            background: var(--accent);
-            color: #fff;
-            font-size: 15px;
-            font-weight: 600;
-        }
         .grid {
             width: 100%;
             max-width: 560px;
-            margin-top: 32px;
+            margin-top: 12px;
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 12px;
@@ -173,7 +145,7 @@
 <body>
     <div class="logo">B</div>
     <h1>Browdika</h1>
-    <p class="sub">Cari di Google atau buka situs favoritmu.</p>
+    <p class="sub">Cari lewat kolom alamat di atas, atau buka situs favoritmu.</p>
 
     <div class="marquee" role="marquee" aria-label="Semoga senang Menggunakan Browser ini, Gunakan Dengan Bijak. Salam Dari @ndik@">
         <div class="marquee-track">
@@ -181,11 +153,6 @@
             <span aria-hidden="true">Semoga senang Menggunakan Browser ini, Gunakan Dengan Bijak. Salam Dari @ndik@</span>
         </div>
     </div>
-
-    <form action="https://www.google.com/search" method="get">
-        <input type="text" name="q" placeholder="Cari di Google…" autocomplete="off" />
-        <button type="submit">Cari</button>
-    </form>
 
     <div class="grid">
         <a class="tile" href="https://www.google.com">
