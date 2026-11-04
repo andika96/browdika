@@ -24,7 +24,7 @@ APK dibangun otomatis oleh GitHub Actions pada setiap push ke `main`.
 
 - Package: `com.browdika.browser`
 - minSdk 26, targetSdk 35
-- Kotlin 1.9.25, AGP 8.7.3, Gradle 8.9
+- Kotlin 1.9.25, AGP 8.6.1, Gradle 8.7
 
 ## Catatan
 
