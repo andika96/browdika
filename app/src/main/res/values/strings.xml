@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Browdika</string>
+    <string name="address_hint">Cari atau ketik alamat</string>
+    <string name="go">Buka</string>
+    <string name="back">Kembali</string>
+    <string name="forward">Maju</string>
+    <string name="home">Beranda</string>
+    <string name="reload">Muat ulang</string>
+</resources>
