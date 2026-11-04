@@ -50,6 +50,8 @@ class MainActivity : AppCompatActivity() {
 
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var fallbackBlockedUntil = 0L
+    private lateinit var mobileUserAgent: String
+    private var facebookDesktopMode = false
 
     private val fileChooserLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -131,7 +133,8 @@ class MainActivity : AppCompatActivity() {
 
             // Remove the Android WebView marker and identify the app instead.
             // This improves compatibility with sites that reject embedded WebViews.
-            userAgentString = userAgentString.replace("; wv", "") + " Browdika/1.0"
+            mobileUserAgent = userAgentString.replace("; wv", "") + " Browdika/1.0"
+            userAgentString = mobileUserAgent
         }
 
         CookieManager.getInstance().apply {
@@ -156,15 +159,35 @@ class MainActivity : AppCompatActivity() {
                 val url = request.url
                 val scheme = url.scheme?.lowercase() ?: return false
 
+                // While Facebook is shown in desktop mode, ignore its attempts to
+                // hand the page over to the Facebook/Messenger app. Keeping the
+                // desktop page open is what lets Messages work inside the browser.
+                if (facebookDesktopMode && isFacebookAppUri(url)) {
+                    return true
+                }
+
                 return when (scheme) {
-                    "http", "https", "about", "data" -> false
+                    "http", "https", "about", "data" -> {
+                        if (isFacebookMessagesUrl(url.toString())) {
+                            if (!(facebookDesktopMode && isFacebookUrl(view.url))) {
+                                openFacebookWeb(url.toString())
+                                return true
+                            }
+                        } else if (facebookDesktopMode &&
+                            url.host != null &&
+                            !isFacebookHost(url.host)
+                        ) {
+                            restoreMobileUserAgent()
+                        }
+                        false
+                    }
                     "file", "javascript" -> true
                     "fb", "fbconnect", "facebook" -> {
-                        loadFallback(facebookWebFallback(url))
+                        openFacebookWeb(facebookWebFallback(url))
                         true
                     }
                     "fb-messenger", "messenger" -> {
-                        loadFallback(MESSENGER_URL)
+                        openFacebookWeb(MESSENGER_URL)
                         true
                     }
                     "intent" -> {
@@ -183,6 +206,9 @@ class MainActivity : AppCompatActivity() {
                 url: String?,
                 favicon: android.graphics.Bitmap?
             ) {
+                if (facebookDesktopMode && url != null && !isFacebookUrl(url)) {
+                    restoreMobileUserAgent()
+                }
                 binding.progressBar.isVisible = true
                 updateAddressBar(url)
                 updateNavigationButtons()
@@ -294,6 +320,7 @@ class MainActivity : AppCompatActivity() {
             binding.webView.reload()
         }
         binding.btnHome.setOnClickListener {
+            restoreMobileUserAgent()
             binding.webView.loadUrl(HOME_URL)
         }
     }
@@ -322,6 +349,9 @@ class MainActivity : AppCompatActivity() {
             else -> googleSearch(text)
         }
 
+        if (!isFacebookUrl(url)) {
+            restoreMobileUserAgent()
+        }
         binding.webView.loadUrl(url)
         binding.addressBar.clearFocus()
         hideKeyboard()
@@ -403,6 +433,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openIntentUri(uri: Uri) {
+        if (facebookDesktopMode && isFacebookAppUri(uri)) return
         try {
             val intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
             try {
@@ -411,8 +442,12 @@ class MainActivity : AppCompatActivity() {
                 val fallback = intent.getStringExtra("browser_fallback_url")
                 val data = intent.data
                 when {
-                    !fallback.isNullOrBlank() -> loadFallback(fallback)
-                    data != null && handleSchemeFallback(data) -> Unit
+                    !fallback.isNullOrBlank() -> {
+                        if (!handleSchemeFallback(Uri.parse(fallback))) showNoApp()
+                    }
+                    data != null -> {
+                        if (!handleSchemeFallback(data)) showNoApp()
+                    }
                     else -> showNoApp()
                 }
             }
@@ -424,15 +459,24 @@ class MainActivity : AppCompatActivity() {
     private fun handleSchemeFallback(uri: Uri): Boolean {
         return when (uri.scheme?.lowercase()) {
             "http", "https" -> {
-                loadFallback(uri.toString())
+                val url = uri.toString()
+                if (isFacebookUrl(url)) {
+                    openFacebookWeb(url)
+                } else {
+                    loadFallback(url)
+                }
                 true
             }
             "fb", "fbconnect", "facebook" -> {
-                loadFallback(facebookWebFallback(uri))
+                openFacebookWeb(facebookWebFallback(uri))
                 true
             }
             "fb-messenger", "messenger" -> {
-                loadFallback(MESSENGER_URL)
+                openFacebookWeb(MESSENGER_URL)
+                true
+            }
+            "intent" -> {
+                openIntentUri(uri)
                 true
             }
             else -> false
@@ -443,37 +487,83 @@ class MainActivity : AppCompatActivity() {
         val target = ((uri.host ?: "") + "/" + (uri.path ?: "")).lowercase()
         return when {
             "messag" in target || "thread" in target ->
-                "https://m.facebook.com/messages"
+                "https://www.facebook.com/messages"
             "notification" in target ->
-                "https://m.facebook.com/notifications"
+                "https://www.facebook.com/notifications"
             "profile" in target -> {
                 val id = uri.lastPathSegment
                 if (!id.isNullOrBlank()) {
-                    "https://m.facebook.com/profile.php?id=$id"
+                    "https://www.facebook.com/profile.php?id=$id"
                 } else {
-                    "https://m.facebook.com/profile.php"
+                    "https://www.facebook.com/profile.php"
                 }
             }
             "friend" in target ->
-                "https://m.facebook.com/friends"
+                "https://www.facebook.com/friends"
             "group" in target ->
-                "https://m.facebook.com/groups"
+                "https://www.facebook.com/groups"
             "video" in target || "watch" in target ->
-                "https://m.facebook.com/watch"
-            else -> "https://m.facebook.com/"
+                "https://www.facebook.com/watch"
+            else -> "https://www.facebook.com/"
         }
+    }
+
+    private fun openFacebookWeb(url: String) {
+        facebookDesktopMode = true
+        binding.webView.settings.userAgentString = DESKTOP_USER_AGENT
+        binding.webView.loadUrl(url)
+    }
+
+    private fun restoreMobileUserAgent() {
+        if (!facebookDesktopMode) return
+        facebookDesktopMode = false
+        binding.webView.settings.userAgentString = mobileUserAgent
+    }
+
+    private fun isFacebookHost(host: String?): Boolean {
+        if (host.isNullOrBlank()) return false
+        val value = host.lowercase()
+        return value == "facebook.com" ||
+            value.endsWith(".facebook.com") ||
+            value == "fb.com" ||
+            value.endsWith(".fb.com") ||
+            value == "messenger.com" ||
+            value.endsWith(".messenger.com") ||
+            value == "m.me"
+    }
+
+    private fun isFacebookUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        return try {
+            isFacebookHost(Uri.parse(url).host)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun isFacebookMessagesUrl(url: String): Boolean {
+        if (!isFacebookUrl(url)) return false
+        val path = Uri.parse(url).path?.lowercase() ?: return false
+        return path.startsWith("/messages") || path.startsWith("/thread")
+    }
+
+    private fun isFacebookAppUri(uri: Uri): Boolean {
+        val scheme = uri.scheme?.lowercase() ?: return false
+        if (scheme in setOf("fb", "fbconnect", "facebook", "fb-messenger", "messenger")) {
+            return true
+        }
+        if (scheme != "intent") return false
+        val raw = uri.toString().lowercase()
+        return raw.contains("facebook") ||
+            raw.contains("katana") ||
+            raw.contains("orca") ||
+            raw.contains("messenger") ||
+            raw.contains("scheme=fb")
     }
 
     private fun loadFallback(url: String) {
         val now = SystemClock.elapsedRealtime()
-        if (now < fallbackBlockedUntil) {
-            Toast.makeText(
-                this,
-                "Tautan ini tidak bisa dibuka di browser.",
-                Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
+        if (now < fallbackBlockedUntil) return
         fallbackBlockedUntil = now + FALLBACK_GUARD_MS
         binding.webView.loadUrl(url)
     }
@@ -536,7 +626,10 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val ASSET_BASE = "https://appassets.androidplatform.net/assets/"
         private const val HOME_URL = ASSET_BASE + "home.html"
-        private const val MESSENGER_URL = "https://m.facebook.com/messages"
+        private const val MESSENGER_URL = "https://www.facebook.com/messages"
+        private const val DESKTOP_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         private const val FALLBACK_GUARD_MS = 5000L
         private const val LEGACY_STORAGE_REQUEST = 100
     }
