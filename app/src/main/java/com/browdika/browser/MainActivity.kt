@@ -690,7 +690,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-        val uri = manager.getUriForDownloadedFile(item.id)
+        val uri = try {
+            manager.getUriForDownloadedFile(item.id)
+        } catch (e: Exception) {
+            null
+        }
         if (uri == null) {
             Toast.makeText(this, R.string.download_missing, Toast.LENGTH_SHORT).show()
             return
@@ -702,7 +706,7 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
+        } catch (e: Exception) {
             Toast.makeText(this, R.string.download_no_app, Toast.LENGTH_SHORT).show()
         }
     }
