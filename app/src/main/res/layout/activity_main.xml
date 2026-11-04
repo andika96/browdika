@@ -44,30 +44,21 @@
             android:tint="?attr/colorPrimary" />
 
         <ImageButton
-            android:id="@+id/btnHistory"
-            android:layout_width="44dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/history"
-            android:src="@drawable/ic_history"
-            android:tint="?attr/colorOnSurface" />
-
-        <ImageButton
-            android:id="@+id/btnDownloads"
-            android:layout_width="44dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/downloads"
-            android:src="@drawable/ic_download"
-            android:tint="?attr/colorOnSurface" />
-
-        <ImageButton
             android:id="@+id/btnTheme"
             android:layout_width="44dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/switch_to_dark"
             android:src="@drawable/ic_dark_mode"
+            android:tint="?attr/colorOnSurface" />
+
+        <ImageButton
+            android:id="@+id/btnMenu"
+            android:layout_width="44dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/more_options"
+            android:src="@drawable/ic_more_vert"
             android:tint="?attr/colorOnSurface" />
     </LinearLayout>
 

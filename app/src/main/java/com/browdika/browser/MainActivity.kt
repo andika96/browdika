@@ -16,6 +16,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -46,6 +47,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.appcompat.widget.PopupMenu
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
@@ -488,11 +490,8 @@ class MainActivity : AppCompatActivity() {
             addTab(HOME_URL)
             true
         }
-        binding.btnHistory.setOnClickListener {
-            showHistoryDialog()
-        }
-        binding.btnDownloads.setOnClickListener {
-            showDownloadsDialog()
+        binding.btnMenu.setOnClickListener {
+            showMainMenu()
         }
         binding.btnTheme.setOnClickListener {
             toggleTheme()
@@ -501,6 +500,26 @@ class MainActivity : AppCompatActivity() {
             useSystemTheme()
             true
         }
+    }
+
+    private fun showMainMenu() {
+        val popup = PopupMenu(this, binding.btnMenu)
+        popup.menuInflater.inflate(R.menu.menu_main, popup.menu)
+        popup.gravity = Gravity.END
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.action_history -> {
+                    showHistoryDialog()
+                    true
+                }
+                R.id.action_downloads -> {
+                    showDownloadsDialog()
+                    true
+                }
+                else -> false
+            }
+        }
+        popup.show()
     }
 
     private fun setupBackNavigation() {
